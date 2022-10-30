@@ -12,8 +12,6 @@ void usage(const char * program_name)
 	printf("  port - number (0-%d)\n", MAX_PORT_NUMBER);
 }
 
-// On error, returns -1
-// On success, returns port number in range (0, 65535)
 int get_port_from_string(const char * port_str)
 {
 	if (NULL == port_str)
@@ -56,11 +54,24 @@ int main(int argc, char * argv[])
 	}
 
 	server_t server;
+
 	if (init_server(&server, (unsigned short) port) == -1)
 	{
 		printf("failed to init server\n");
 		return -1;
 	}
 
-	return start_server(&server);
+	if (start_server(&server) == -1)
+	{
+		printf("failed to start server\n");
+		return -1;
+	}
+
+	if (deinit_server(&server) == -1)
+	{
+		printf("failed to deinit server\n");
+		return -1;
+	}
+
+	return 0;
 }

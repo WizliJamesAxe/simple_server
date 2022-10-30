@@ -19,9 +19,5 @@ void _log_(
 	vsnprintf(buf, sizeof(buf), format, ap);
 	va_end(ap);
 
-	if (LOG_ERR == level)
-		fprintf(stderr, "<%s:%d> %s\n", func, line, buf);
-	else
-		printf("<%s:%d> %s\n", func, line, buf);
-	// syslog(level, "<%s:%d> %s", func, line, buf);
+	syslog(level, "<%s:%d> %s", func, line, buf);
 }

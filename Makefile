@@ -3,16 +3,18 @@
 OUTPUT_FILE = server
 SRC = main.c log.c server.c
 
-BUILD_FLAGS = -Wall -Werror -Wformat-security -Wformat=2 \
-              -Wtype-limits -Wuninitialized -Wpointer-arith \
-              -Wno-format-nonliteral -Wextra -Wno-unused-parameter \
-              -Wno-empty-body -Wconversion
+COMPILE_FLAGS = -Wall -Werror -Wformat-security -Wformat=2 \
+                -Wtype-limits -Wuninitialized -Wpointer-arith \
+                -Wno-format-nonliteral -Wextra -Wno-unused-parameter \
+                -Wno-empty-body -Wconversion
+
+LINK_FLAGS = -lev
 
 release:
-	gcc ${BUILD_FLAGS} ${SRC} -o ${OUTPUT_FILE} -O3 -s
+	gcc ${COMPILE_FLAGS} ${SRC} -o ${OUTPUT_FILE} ${LINK_FLAGS} -O3 -s
 
 debug:
-	gcc ${BUILD_FLAGS} ${SRC} -o ${OUTPUT_FILE} -Og
+	gcc ${COMPILE_FLAGS} ${SRC} -o ${OUTPUT_FILE} ${LINK_FLAGS} -Og
 
 clean:
 	rm server

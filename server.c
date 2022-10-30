@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
+#include <fcntl.h>
 
 #include <ev.h>
 
@@ -14,6 +15,122 @@
 #include "log.h"
 
 #define MAX_CLIENTS_COUNT 10
+
+static void sigint_handler(EV_P_ ev_signal *w, int revents)
+{
+	ev_break(loop, EVBREAK_ALL);
+}
+
+static int setnonblock(int fd)
+{
+	int flags;
+
+	flags = fcntl(fd, F_GETFL);
+	flags |= O_NONBLOCK;
+	return fcntl(fd, F_SETFL, flags);
+}
+
+static int send_answer(int fd, const char * answer, unsigned size)
+{
+	ssize_t rc = send(fd, answer, size, 0);
+	if (rc == -1)
+	{
+		log_ERROR("send failed (%s)", strerror(errno));
+		return -1;
+	}
+
+	return 0;
+}
+
+static void rx_sock_handler(EV_P_ ev_io * w, int revents)
+{
+	if(EV_ERROR & revents)
+	{
+		log_ERROR("invalid event (%s)", strerror(errno));
+		goto close_watcher;
+	}
+
+	char buffer[2048];
+	buffer[0] = '\0';
+
+	ssize_t len = recv(w->fd, buffer, sizeof(buffer), 0);
+	if (len < 0)
+	{
+		if (errno == EAGAIN)
+			return;
+
+		log_ERROR("recv failed (%s)", strerror(errno));
+		goto close_watcher;
+	}
+
+	if (len == 0)
+	{
+		log_DEBUG("Client disconnected (fd=%d)", w->fd);
+		goto close_watcher;
+	}
+
+	buffer[len] = '\0';
+
+	log_DEBUG("Recieved from client(fd=%d): '%s' (len = %ld)", w->fd, buffer, len);
+
+	int rc = send_answer(w->fd, buffer, (unsigned) len);
+	if (rc == -1)
+	{
+		log_ERROR("send answer failed");
+		goto close_watcher;
+	}
+
+	return;
+
+close_watcher:
+	close(w->fd);
+	ev_io_stop (EV_A_ w);
+	free(w);
+}
+
+static void ln_sock_handler(EV_P_ ev_io * w, int revents)
+{
+	if(EV_ERROR & revents)
+	{
+		log_ERROR("invalid event (%s)", strerror(errno));
+		goto break_loop;
+	}
+
+	struct sockaddr_in client_addr;
+	socklen_t client_addr_size = sizeof(client_addr);
+	int client_sock = accept(w->fd, (struct sockaddr * ) &client_addr, &client_addr_size);
+	if (client_sock == -1)
+	{
+		log_ERROR("accept failed (%s)", strerror(errno));
+		goto break_loop;
+	}
+
+	setnonblock(client_sock);
+
+	char ip[INET_ADDRSTRLEN];
+	uint16_t port;
+
+	inet_ntop(AF_INET, &client_addr.sin_addr, ip, sizeof(ip));
+	port = htons(client_addr.sin_port);
+
+	log_DEBUG("Connected client (fd=%d): %s:%d", client_sock, ip, port);
+
+	ev_io * rx_sock_watcher = (struct ev_io * ) malloc (sizeof(ev_io));
+	if (rx_sock_watcher == NULL)
+	{
+		log_ERROR("malloc failed (%s)", strerror(errno));
+		goto break_loop;
+	}
+
+	ev_io_init(rx_sock_watcher, rx_sock_handler, client_sock, EV_READ);
+	ev_io_start(loop, rx_sock_watcher);
+
+	return;
+
+break_loop:
+	ev_io_stop (EV_A_ w);
+	ev_break (EV_A_ EVBREAK_ALL);
+}
 
 int init_server(server_t * server, unsigned short port)
 {
@@ -23,7 +140,7 @@ int init_server(server_t * server, unsigned short port)
 	server->ln_sock = socket(AF_INET, SOCK_STREAM, 0);
 	if (server->ln_sock == -1)
 	{
-		log_ERROR("socket failed (%s)\n", strerror(errno));
+		log_ERROR("socket failed (%s)", strerror(errno));
 		return -1;
 	}
 
@@ -31,14 +148,14 @@ int init_server(server_t * server, unsigned short port)
 	rc = setsockopt(server->ln_sock, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
 	if (rc == -1)
 	{
-		log_ERROR("setsockopt failed (%s)\n", strerror(errno));
+		log_ERROR("setsockopt failed (%s)", strerror(errno));
 		return -1;
 	}
 
 	rc = setsockopt(server->ln_sock, SOL_SOCKET, SO_REUSEPORT, &optval, sizeof(optval));
 	if (rc == -1)
 	{
-		log_ERROR("setsockopt failed (%s)\n", strerror(errno));
+		log_ERROR("setsockopt failed (%s)", strerror(errno));
 		return -1;
 	}
 
@@ -51,57 +168,56 @@ int init_server(server_t * server, unsigned short port)
 	rc = bind(server->ln_sock, (struct sockaddr * ) &server->addr, sizeof(server->addr));
 	if (rc == -1)
 	{
-		log_ERROR("bind failed (%s)\n", strerror(errno));
+		log_ERROR("bind failed (%s)", strerror(errno));
 		return -1;
 	}
 
 	rc = listen(server->ln_sock, MAX_CLIENTS_COUNT);
 	if (rc == -1)
 	{
-		log_ERROR("listen failed (%s)\n", strerror(errno));
+		log_ERROR("listen failed (%s)", strerror(errno));
 		return -1;
 	}
 
 	server->is_ready = true;
+	log_DEBUG("Server is initialized");
 	return 0;
 }
 
 int start_server(server_t * server)
 {
-	struct sockaddr_in peer_addr;
-	socklen_t peer_addr_size;
-
-	peer_addr_size = sizeof(peer_addr);
-	int client_sock = accept(server->ln_sock, (struct sockaddr * ) &peer_addr, &peer_addr_size);
-	if (client_sock == -1)
+	if (!server->is_ready)
 	{
-		printf("accept failed, errno = %d\n", errno);
-		return errno;
+		log_ERROR("server is not ready");
+		return -1;
 	}
 
-	printf("Log: 5\n");
-	while (1)
+	struct ev_loop *loop = EV_DEFAULT;
+
+	ev_signal signal_watcher;
+	ev_signal_init(&signal_watcher, sigint_handler, SIGINT);
+	ev_signal_start(loop, &signal_watcher);
+
+	ev_io ln_sock_watcher;
+	ev_io_init(&ln_sock_watcher, ln_sock_handler, server->ln_sock, EV_READ);
+	ev_io_start(loop, &ln_sock_watcher);
+
+	log_DEBUG("Server is started");
+	ev_run(loop, 0);
+
+	return 0;
+}
+
+int deinit_server(server_t * server)
+{
+	if (close(server->ln_sock))
 	{
-		char buffer[2048];
-		buffer[0] = 0;
-
-		printf("Log: 6\n");
-		ssize_t len = recv(client_sock, buffer, sizeof(buffer), 0);
-		if (len < 0)
-		{
-			printf("recv failed, errno = %d\n", errno);
-			return errno;
-		}
-
-		printf("recieved: %s\n", buffer);
-
-		if (0 == strcmp("exit", buffer))
-			break;
+		log_ERROR("close failed (%s)", strerror(errno));
+		return -1;
 	}
 
-	printf("Log: 7\n");
-	close(client_sock);
-	// close(server_sock);
+	memset(server, 0, sizeof(*server));
 
+	log_DEBUG("Server is deinitialized");
 	return 0;
 }
