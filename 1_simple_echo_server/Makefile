@@ -6,7 +6,7 @@ SRC = main.c log.c server.c
 COMPILE_FLAGS = -Wall -Werror -Wformat-security -Wformat=2 \
                 -Wtype-limits -Wuninitialized -Wpointer-arith \
                 -Wno-format-nonliteral -Wextra -Wno-unused-parameter \
-                -Wno-empty-body -Wconversion
+                -Wno-empty-body -Wconversion -fno-strict-aliasing
 
 LINK_FLAGS = -lev
 

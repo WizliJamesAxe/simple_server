@@ -47,7 +47,7 @@ static void rx_sock_handler(EV_P_ ev_io * w, int revents)
 	if(EV_ERROR & revents)
 	{
 		log_ERROR("invalid event (%s)", strerror(errno));
-		goto close_watcher;
+		goto free_watcher;
 	}
 
 	char buffer[2048];
@@ -60,13 +60,13 @@ static void rx_sock_handler(EV_P_ ev_io * w, int revents)
 			return;
 
 		log_ERROR("recv failed (%s)", strerror(errno));
-		goto close_watcher;
+		goto free_watcher;
 	}
 
 	if (len == 0)
 	{
 		log_DEBUG("Client disconnected (fd=%d)", w->fd);
-		goto close_watcher;
+		goto free_watcher;
 	}
 
 	buffer[len] = '\0';
@@ -77,12 +77,12 @@ static void rx_sock_handler(EV_P_ ev_io * w, int revents)
 	if (rc == -1)
 	{
 		log_ERROR("send answer failed");
-		goto close_watcher;
+		goto free_watcher;
 	}
 
 	return;
 
-close_watcher:
+free_watcher:
 	close(w->fd);
 	ev_io_stop (EV_A_ w);
 	free(w);
@@ -115,7 +115,7 @@ static void ln_sock_handler(EV_P_ ev_io * w, int revents)
 
 	log_DEBUG("Connected client (fd=%d): %s:%d", client_sock, ip, port);
 
-	ev_io * rx_sock_watcher = (struct ev_io * ) malloc (sizeof(ev_io));
+	ev_io * rx_sock_watcher = (struct ev_io * )malloc(sizeof(ev_io));
 	if (rx_sock_watcher == NULL)
 	{
 		log_ERROR("malloc failed (%s)", strerror(errno));
@@ -204,6 +204,9 @@ int start_server(server_t * server)
 
 	log_DEBUG("Server is started");
 	ev_run(loop, 0);
+
+	// This we need to free all watchers and close theirs sockets
+	// But now i dont store it, so it will close and free after program stops
 
 	return 0;
 }
