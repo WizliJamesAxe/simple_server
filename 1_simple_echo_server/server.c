@@ -9,9 +9,8 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 
-#include <ev.h>
-
 #include "server.h"
+#include "client.h"
 #include "log.h"
 
 #define MAX_CLIENTS_COUNT 10
@@ -42,7 +41,7 @@ static int send_answer(int fd, const char * answer, unsigned size)
 	return 0;
 }
 
-static void rx_sock_handler(EV_P_ ev_io * w, int revents)
+static void client_handler(EV_P_ ev_io * w, int revents)
 {
 	if(EV_ERROR & revents)
 	{
@@ -85,7 +84,7 @@ static void rx_sock_handler(EV_P_ ev_io * w, int revents)
 free_watcher:
 	close(w->fd);
 	ev_io_stop (EV_A_ w);
-	free(w);
+	remove_client(GET_CLIENT(w));
 }
 
 static void ln_sock_handler(EV_P_ ev_io * w, int revents)
@@ -115,15 +114,25 @@ static void ln_sock_handler(EV_P_ ev_io * w, int revents)
 
 	log_DEBUG("Connected client (fd=%d): %s:%d", client_sock, ip, port);
 
-	ev_io * rx_sock_watcher = (struct ev_io * )malloc(sizeof(ev_io));
-	if (rx_sock_watcher == NULL)
+	client_t * client = add_client(ev_userdata(EV_A));
+	if (client == NULL)
 	{
-		log_ERROR("malloc failed (%s)", strerror(errno));
+		log_ERROR("add_client failed");
 		goto break_loop;
 	}
 
-	ev_io_init(rx_sock_watcher, rx_sock_handler, client_sock, EV_READ);
-	ev_io_start(loop, rx_sock_watcher);
+	memcpy(&client->addr, &client_addr, sizeof(client_addr));
+
+	if (snprintf(client->name, sizeof(client->name), "%s:%d", ip, port) < 0)
+	{
+		log_ERROR("snprintf failed");
+		goto break_loop;
+	}
+
+	ev_io * watcher = GET_WATCHER(client);
+
+	ev_io_init(watcher, client_handler, client_sock, EV_READ);
+	ev_io_start(loop, watcher);
 
 	return;
 
@@ -134,7 +143,7 @@ break_loop:
 
 int init_server(server_t * server, unsigned short port)
 {
-	server->is_ready = false;
+	memset(server, 0, sizeof(*server));
 	server->port = port;
 
 	server->ln_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -158,8 +167,6 @@ int init_server(server_t * server, unsigned short port)
 		log_ERROR("setsockopt failed (%s)", strerror(errno));
 		return -1;
 	}
-
-	memset(&server->addr, 0, sizeof(server->addr));
 
 	server->addr.sin_family = AF_INET;
 	server->addr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -202,11 +209,10 @@ int start_server(server_t * server)
 	ev_io_init(&ln_sock_watcher, ln_sock_handler, server->ln_sock, EV_READ);
 	ev_io_start(loop, &ln_sock_watcher);
 
+	ev_set_userdata(loop, server);
+
 	log_DEBUG("Server is started");
 	ev_run(loop, 0);
-
-	// This we need to free all watchers and close theirs sockets
-	// But now i dont store it, so it will close and free after program stops
 
 	return 0;
 }
@@ -217,6 +223,17 @@ int deinit_server(server_t * server)
 	{
 		log_ERROR("close failed (%s)", strerror(errno));
 		return -1;
+	}
+
+	while (server->clients.next != NULL)
+	{
+		ev_io * watcher = GET_WATCHER(server->clients.next);
+		if (close(watcher->fd))
+		{
+			log_ERROR("close failed (%s)", strerror(errno));
+			return -1;
+		}
+		remove_client(server->clients.next);
 	}
 
 	memset(server, 0, sizeof(*server));

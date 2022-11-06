@@ -55,7 +55,7 @@ int main(int argc, char * argv[])
 
 	server_t server;
 
-	if (init_server(&server, (unsigned short) port) == -1)
+	if (init_server(&server, (unsigned short)port) == -1)
 	{
 		printf("failed to init server\n");
 		return -1;

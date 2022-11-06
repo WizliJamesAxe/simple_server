@@ -1,7 +1,7 @@
 # Simple Makefile to build server
 
 OUTPUT_FILE = server
-SRC = main.c log.c server.c
+SRC = main.c log.c server.c client.c
 
 COMPILE_FLAGS = -Wall -Werror -Wformat-security -Wformat=2 \
                 -Wtype-limits -Wuninitialized -Wpointer-arith \
@@ -10,11 +10,13 @@ COMPILE_FLAGS = -Wall -Werror -Wformat-security -Wformat=2 \
 
 LINK_FLAGS = -lev
 
+INCLUDE_DIRS = -I./include
+
 release:
-	gcc ${COMPILE_FLAGS} ${SRC} -o ${OUTPUT_FILE} ${LINK_FLAGS} -O3 -s
+	gcc ${INCLUDE_DIRS} ${COMPILE_FLAGS} ${SRC} -o ${OUTPUT_FILE} ${LINK_FLAGS} -O3 -s
 
 debug:
-	gcc ${COMPILE_FLAGS} ${SRC} -o ${OUTPUT_FILE} ${LINK_FLAGS} -Og
+	gcc ${INCLUDE_DIRS} ${COMPILE_FLAGS} ${SRC} -o ${OUTPUT_FILE} ${LINK_FLAGS} -Og
 
 clean:
 	rm server
